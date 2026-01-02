@@ -1,8 +1,8 @@
 1<?xml version="1.0" encoding="utf-8"?>
 2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
 3    package="com.jaylee.hardware_cert_tool"
-4    android:versionCode="260102151"
-5    android:versionName="260102151" >
+4    android:versionCode="260102152"
+5    android:versionName="260102152" >
 6
 7    <uses-sdk
 8        android:minSdkVersion="31"
