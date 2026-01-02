@@ -7,8 +7,10 @@ color purple_700
 color teal_200
 color teal_700
 color white
+drawable ic_create
 drawable ic_launcher_background
 drawable ic_launcher_foreground
+drawable ic_view
 id btnGenerateCsr
 id btnInstallManual
 id btnSelfSign
@@ -17,6 +19,10 @@ id containerManual
 id containerSelfSign
 id editCertInput
 id editSubject
+id fragment_container
+id nav_view
+id navigation_create
+id navigation_view
 id radioFlowType
 id radioManual
 id radioSelfSign
@@ -24,7 +30,12 @@ id spinnerKeyType
 id txtInstructions
 id txtVerificationResult
 layout activity_main
+layout fragment_create
+layout fragment_view
+menu bottom_nav_menu
 mipmap ic_launcher
+mipmap ic_launcher_foreground
 mipmap ic_launcher_round
 string app_name
+string app_name_short
 style Theme.CertProvisioner

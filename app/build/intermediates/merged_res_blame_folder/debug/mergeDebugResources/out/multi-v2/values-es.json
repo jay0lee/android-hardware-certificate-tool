@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.example.certprovisioner.app-mergeDebugResources-29:/values-es/values-es.xml",
+            "outputFile": "com.jaylee.hardware_cert_tool.app-mergeDebugResources-35:/values-es/values-es.xml",
             "map": [
                 {
                     "source": "/home/jay/.gradle/caches/9.0-milestone-1/transforms/ca1575f132865d02d4ef8a21e52754ff/transformed/appcompat-1.6.1/res/values-es/values-es.xml",

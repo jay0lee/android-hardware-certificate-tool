@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.jaylee.hardware_cert_tool"
-    android:versionCode="1"
-    android:versionName="1.0" >
+    android:versionCode="260102151"
+    android:versionName="260102151" >
 
     <uses-sdk
-        android:minSdkVersion="26"
-        android:targetSdkVersion="35" />
+        android:minSdkVersion="31"
+        android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -22,14 +22,15 @@
         android:debuggable="true"
         android:extractNativeLibs="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="Cert Provisioner"
+        android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:testOnly="true"
         android:theme="@style/Theme.CertProvisioner" >
         <activity
-            android:name="com.example.certprovisioner.MainActivity"
-            android:exported="true" >
+            android:name="com.jaylee.hardware_cert_tool.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name_short" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

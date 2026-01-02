@@ -7,16 +7,15 @@ plugins {
 }
 
 android {
-    // CRITICAL: This generates the R class in the correct package
     namespace = "com.jaylee.hardware_cert_tool"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.jaylee.hardware_cert_tool"
-        minSdk = 26
-        targetSdk = 35
+        minSdk = 31
+        targetSdk = 34
 
-        // --- VERSIONING LOGIC START ---
+        // --- VERSIONING LOGIC ---
         val date = Date()
         val baseFormat = SimpleDateFormat("yyMMddHH").format(date)
         val minuteTens = SimpleDateFormat("mm").format(date).toInt() / 10
@@ -24,7 +23,6 @@ android {
         
         versionCode = combinedCode
         versionName = combinedCode.toString()
-        // --- VERSIONING LOGIC END ---
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -53,7 +51,11 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     
-    // Cryptography (Bouncy Castle only)
+    // Lifecycle & Coroutines (CRITICAL for Fragments)
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.fragment:fragment-ktx:1.6.2") 
+
+    // Cryptography
     implementation("org.bouncycastle:bcpkix-jdk15to18:1.76") 
 
     testImplementation("junit:junit:4.13.2")
