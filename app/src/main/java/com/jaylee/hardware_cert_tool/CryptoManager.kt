@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION", "DEPRECATION")
+
 package com.jaylee.hardware_cert_tool
 
 import android.content.Context
@@ -137,28 +139,6 @@ object CryptoManager {
         context.startActivity(intent)
     }
 
-    fun getKeySecurityLevel(context: Context, alias: String): String {
-        return try {
-            val privateKey = KeyChain.getPrivateKey(context, alias)
-            if (privateKey == null) return "Software / Unknown"
-
-            val factory = KeyFactory.getInstance(privateKey.algorithm, "AndroidKeyStore")
-            val keyInfo = factory.getKeySpec(privateKey, KeyInfo::class.java)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                when (keyInfo.securityLevel) {
-                    KeyProperties.SECURITY_LEVEL_STRONGBOX -> "STRONGBOX (Titan M/SE)"
-                    KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "TEE (TrustZone)"
-                    KeyProperties.SECURITY_LEVEL_SOFTWARE -> "SOFTWARE"
-                    else -> "UNKNOWN"
-                }
-            } else {
-                if (keyInfo.isInsideSecureHardware) "HARDWARE (TEE)" else "SOFTWARE"
-            }
-        } catch (e: Exception) {
-            "Error: ${e.message}"
-        }
-    }
 
     fun getCertificateDetails(context: Context, alias: String): String {
         return try {

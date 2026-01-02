@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.jaylee.hardware_cert_tool"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.jaylee.hardware_cert_tool"
-        minSdk = 31
-        targetSdk = 34
+        minSdk = 26
+        targetSdk = 36
 
         // --- VERSIONING LOGIC ---
         val date = Date()
@@ -46,19 +46,19 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.appcompat:appcompat:1.6.1")
-    implementation("com.google.android.material:material:1.11.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.13.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
     
     // Lifecycle & Coroutines (CRITICAL for Fragments)
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.fragment:fragment-ktx:1.6.2") 
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
 
     // Cryptography
-    implementation("org.bouncycastle:bcpkix-jdk15to18:1.76") 
+    implementation("org.bouncycastle:bcpkix-jdk15to18:1.83")
 
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 }
