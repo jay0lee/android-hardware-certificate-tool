@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "artifactType": {
+    "type": "LINKED_RESOURCES_BINARY_FORMAT",
+    "kind": "Directory"
+  },
+  "applicationId": "com.jaylee.hardware_cert_tool",
+  "variantName": "release",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "attributes": [],
+      "versionCode": 260102093,
+      "versionName": "260102093",
+      "outputFile": "linked-resources-binary-format-release.ap_"
+    }
+  ],
+  "elementType": "File"
+}
