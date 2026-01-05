@@ -3,7 +3,10 @@ package com.jaylee.hardware_cert_tool
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.security.KeyChain
+import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -28,7 +31,9 @@ class CreateFragment : Fragment() {
     private lateinit var btnInstallManual: Button
     private lateinit var btnSelfSign: Button
     
+    // We hold the KeyPair AND the Alias in memory for this session
     private var currentKeyPair: KeyPair? = null
+    private var currentAlias: String? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -56,10 +61,7 @@ class CreateFragment : Fragment() {
         val keyTypes = CryptoManager.KeyType.values()
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, keyTypes)
         autoCompleteKeyType.setAdapter(adapter)
-        
-        // CHANGED: Explicitly set default to EC_P256
-        val defaultType = CryptoManager.KeyType.EC_P256
-        autoCompleteKeyType.setText(defaultType.toString(), false)
+        autoCompleteKeyType.setText(CryptoManager.KeyType.EC_P256.toString(), false)
     }
     
     private fun getSelectedKeyType(): CryptoManager.KeyType {
@@ -68,6 +70,22 @@ class CreateFragment : Fragment() {
             CryptoManager.KeyType.valueOf(text)
         } catch (e: Exception) {
             CryptoManager.KeyType.EC_P256
+        }
+    }
+    
+    // Helper to Launch System Installer
+    private fun promptSystemInstall(pem: String, alias: String) {
+        try {
+            val cleanPem = PemUtils.cleanPem(pem)
+                
+            val certBytes = Base64.decode(cleanPem, Base64.DEFAULT)
+
+            val intent = KeyChain.createInstallIntent()
+            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes)
+            intent.putExtra(KeyChain.EXTRA_NAME, alias)
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "System Install Failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -81,60 +99,94 @@ class CreateFragment : Fragment() {
             }
         }
 
+        // 1. GENERATE CSR
         btnGenerateCsr.setOnClickListener {
             val type = getSelectedKeyType()
             val subject = editSubject.text.toString()
-            generateCsr(type, subject)
-        }
+            
+            // Generate the PERMANENT alias now
+            // We cannot rename Hardware Keys later, so we must use the final name here.
+            val alias = "Cert_" + System.currentTimeMillis()
 
-        btnInstallManual.setOnClickListener {
-            val certPem = editCertInput.text.toString()
-            if (currentKeyPair != null && certPem.isNotBlank()) {
-                installKey(certPem)
-            } else {
-                Toast.makeText(context, "Generate CSR first", Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch(Dispatchers.Default) {
+                try {
+                    // Generate and Hold
+                    currentKeyPair = CryptoManager.generateKeyPair(alias, type)
+                    currentAlias = alias // Remember this alias!
+                    
+                    val csrPem = CryptoManager.generateCsr(currentKeyPair!!, subject)
+
+                    withContext(Dispatchers.Main) {
+                        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("CSR", csrPem))
+                        Toast.makeText(context, "CSR Copied! Key saved as $alias", Toast.LENGTH_SHORT).show()
+                        
+                        editCertInput.setText("")
+                        editCertInput.hint = "Paste the signed certificate here..."
+                        editCertInput.requestFocus()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) { Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
+                }
             }
         }
 
+        // 2. INSTALL MANUAL CERT
+        btnInstallManual.setOnClickListener {
+            val certPem = editCertInput.text.toString()
+            
+            // Check if we have a valid session
+            if (currentKeyPair == null || currentAlias == null) {
+                Toast.makeText(context, "Session Expired: Please generate a new CSR.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            
+            if (certPem.isNotBlank()) {
+                try {
+                    // FIX: Use the SAME alias we generated earlier
+                    val alias = currentAlias!! 
+                    
+                    CryptoManager.installToSystem(requireContext(), currentKeyPair!!, certPem, alias)
+                    
+                    Toast.makeText(context, "Success! Certificate Linked to Hardware Key.", Toast.LENGTH_LONG).show()
+                    
+                    // Optional: Trigger system prompt
+                    promptSystemInstall(certPem, alias)
+                    
+                    // Clear inputs
+                    editCertInput.setText("")
+                    
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Mismatch Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(context, "Paste the certificate first", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 3. SELF SIGN & INSTALL
         btnSelfSign.setOnClickListener {
             val type = getSelectedKeyType()
             val subject = editSubject.text.toString()
-            performSelfSign(type, subject)
-        }
-    }
+            val alias = "Cert_" + System.currentTimeMillis()
 
-    private fun generateCsr(type: CryptoManager.KeyType, subject: String) {
-        lifecycleScope.launch(Dispatchers.Default) {
-            currentKeyPair = CryptoManager.generateKeyPair(type)
-            val csrPem = CryptoManager.generateCsr(currentKeyPair!!, subject)
-
-            withContext(Dispatchers.Main) {
-                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("CSR", csrPem))
-                Toast.makeText(context, "CSR Copied to Clipboard!", Toast.LENGTH_LONG).show()
-                editCertInput.setText("")
-                editCertInput.hint = "Paste your signed certificate here..."
+            lifecycleScope.launch(Dispatchers.Default) {
+                try {
+                    currentKeyPair = CryptoManager.generateKeyPair(alias, type)
+                    currentAlias = alias
+                    
+                    val certPem = CryptoManager.generateSelfSignedCert(currentKeyPair!!, subject)
+                    
+                    CryptoManager.installToSystem(requireContext(), currentKeyPair!!, certPem, alias)
+                    
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Success! Self-Signed Cert Installed.", Toast.LENGTH_SHORT).show()
+                        promptSystemInstall(certPem, alias)
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) { Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
+                }
             }
-        }
-    }
-
-    private fun performSelfSign(type: CryptoManager.KeyType, subject: String) {
-        Toast.makeText(context, "Generating...", Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch(Dispatchers.Default) {
-            currentKeyPair = CryptoManager.generateKeyPair(type)
-            val certPem = CryptoManager.generateSelfSignedCert(currentKeyPair!!, subject)
-            withContext(Dispatchers.Main) {
-                installKey(certPem)
-            }
-        }
-    }
-
-    private fun installKey(certPem: String) {
-        try {
-            val alias = "Certificate_" + System.currentTimeMillis() / 1000
-            CryptoManager.installToSystem(requireContext(), currentKeyPair!!, certPem, alias)
-        } catch (e: Exception) {
-            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }

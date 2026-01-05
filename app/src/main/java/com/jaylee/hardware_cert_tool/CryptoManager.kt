@@ -1,187 +1,207 @@
-@file:Suppress("DEPRECATION", "DEPRECATION")
-
 package com.jaylee.hardware_cert_tool
 
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.security.KeyChain
+import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
+import android.util.Base64
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers
 import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.asn1.x509.BasicConstraints
+import org.bouncycastle.asn1.x509.ExtendedKeyUsage
+import org.bouncycastle.asn1.x509.Extension
+import org.bouncycastle.asn1.x509.ExtensionsGenerator
+import org.bouncycastle.asn1.x509.KeyPurposeId
+import org.bouncycastle.asn1.x509.KeyUsage
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder
-import org.bouncycastle.util.io.pem.PemObject
-import org.bouncycastle.util.io.pem.PemWriter
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.StringWriter
 import java.math.BigInteger
-import java.security.KeyFactory
-import java.security.KeyPair
-import java.security.KeyPairGenerator
-import java.security.KeyStore
-import java.security.Security
+import java.security.*
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
 import java.util.Date
-import java.security.interfaces.RSAPublicKey
-import java.security.interfaces.ECPublicKey
 
 object CryptoManager {
-    init {
-        Security.removeProvider("BC")
-        Security.addProvider(BouncyCastleProvider())
+
+    private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
+
+    enum class KeyType {
+        EC_P256,
+        EC_P384,
+        RSA_2048,
+        RSA_4096
     }
 
-    enum class KeyType(val algorithm: String, val spec: String) {
-        RSA_2048("RSA", "2048"),
-        RSA_4096("RSA", "4096"),
-        EC_P256("EC", "secp256r1"),
-        EC_P384("EC", "secp384r1")
+    private val keyStore: KeyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
+        load(null)
     }
 
-    // Helper to prevent crashes if user types "Bob" instead of "CN=Bob"
-    private fun fixSubjectDn(input: String): String {
-        val trimmed = input.trim()
-        if (trimmed.isEmpty()) return "CN=DefaultUser"
-        // If it contains an '=', assume user knows what they are doing (e.g. O=Corp, CN=User)
-        // If not, assume it's just a Common Name.
-        return if (trimmed.contains("=")) trimmed else "CN=$trimmed"
-    }
+    // --- KEY GENERATION ---
 
-    fun generateKeyPair(type: KeyType): KeyPair {
-        val generator = KeyPairGenerator.getInstance(type.algorithm, "BC")
-        if (type.algorithm == "RSA") {
-            generator.initialize(type.spec.toInt())
-        } else {
-            generator.initialize(ECGenParameterSpec(type.spec))
-        }
-        return generator.generateKeyPair()
-    }
-
-    fun generateCsr(keyPair: KeyPair, subjectName: String): String {
-        // FIX: Sanitize input to prevent X500Name crash
-        val validSubject = fixSubjectDn(subjectName)
-        val subject = X500Name(validSubject)
-        
-        val signerAlgorithm = if (keyPair.private.algorithm == "RSA") "SHA256withRSA" else "SHA256withECDSA"
-        
-        val signer = JcaContentSignerBuilder(signerAlgorithm).build(keyPair.private)
-        val builder = JcaPKCS10CertificationRequestBuilder(subject, keyPair.public)
-        val csr = builder.build(signer)
-
-        val stringWriter = StringWriter()
-        val pemWriter = PemWriter(stringWriter)
-        pemWriter.writeObject(PemObject("CERTIFICATE REQUEST", csr.encoded))
-        pemWriter.close()
-        return stringWriter.toString()
-    }
-
-    fun generateSelfSignedCert(keyPair: KeyPair, subjectName: String): String {
-        // FIX: Sanitize input to prevent X500Name crash
-        val validSubject = fixSubjectDn(subjectName)
-        val issuer = X500Name(validSubject)
-        
-        val serial = BigInteger.valueOf(System.currentTimeMillis())
-        val notBefore = Date(System.currentTimeMillis() - 1000L * 60 * 60 * 24) 
-        val notAfter = Date(System.currentTimeMillis() + 1000L * 60 * 60 * 24 * 365) 
-
-        val builder = JcaX509v3CertificateBuilder(
-            issuer, serial, notBefore, notAfter, issuer, keyPair.public
+    fun generateKeyPair(alias: String, type: KeyType): KeyPair {
+        val kpg = KeyPairGenerator.getInstance(
+            if (type.name.startsWith("EC")) KeyProperties.KEY_ALGORITHM_EC else KeyProperties.KEY_ALGORITHM_RSA,
+            KEYSTORE_PROVIDER
         )
 
-        val sigAlg = if (keyPair.private.algorithm == "RSA") "SHA256withRSA" else "SHA256withECDSA"
-        val signer = JcaContentSignerBuilder(sigAlg).build(keyPair.private)
+        val fullAlias = if (alias.startsWith("Cert_")) alias else "Cert_$alias"
+
+        val builder = KeyGenParameterSpec.Builder(
+            fullAlias,
+            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+        )
+            .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
         
-        val certHolder = builder.build(signer)
-        val cert = JcaX509CertificateConverter().setProvider("BC").getCertificate(certHolder)
-
-        val sw = StringWriter()
-        val pw = PemWriter(sw)
-        pw.writeObject(PemObject("CERTIFICATE", cert.encoded))
-        pw.close()
-        return sw.toString()
-    }
-
-    fun installToSystem(
-        context: Context, 
-        keyPair: KeyPair, 
-        certPem: String, 
-        alias: String
-    ) {
-        val certFactory = CertificateFactory.getInstance("X.509")
-        val cleanPem = certPem.trim() 
-        val certStream = ByteArrayInputStream(cleanPem.toByteArray())
-        val certificates = certFactory.generateCertificates(certStream)
-        val certChain = certificates.map { it as X509Certificate }.toTypedArray()
-
-        val p12Store = KeyStore.getInstance("PKCS12", "BC")
-        p12Store.load(null, null)
-        val tempPass = charArrayOf() 
-        
-        p12Store.setKeyEntry(alias, keyPair.private, tempPass, certChain)
-
-        val bos = ByteArrayOutputStream()
-        p12Store.store(bos, tempPass)
-        val p12Bytes = bos.toByteArray()
-
-        val intent = KeyChain.createInstallIntent().apply {
-            putExtra(KeyChain.EXTRA_PKCS12, p12Bytes)
-            putExtra("pkcs12_password", "")
-            putExtra(KeyChain.EXTRA_NAME, alias)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        when (type) {
+            KeyType.EC_P256 -> builder.setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+            KeyType.EC_P384 -> builder.setAlgorithmParameterSpec(ECGenParameterSpec("secp384r1"))
+            KeyType.RSA_2048 -> {
+                builder.setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+                builder.setKeySize(2048)
+            }
+            KeyType.RSA_4096 -> {
+                builder.setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+                builder.setKeySize(4096)
+            }
         }
-        context.startActivity(intent)
+
+        kpg.initialize(builder.build())
+        return kpg.generateKeyPair()
     }
 
+    // --- CSR GENERATION ---
+    fun generateCsr(keyPair: KeyPair, subjectName: String): String {
+        val algorithm = if (keyPair.private.algorithm == "EC") "SHA256withECDSA" else "SHA256withRSA"
+        
+        val signer = JcaContentSignerBuilder(algorithm).build(keyPair.private)
+        val builder = JcaPKCS10CertificationRequestBuilder(X500Name(subjectName), keyPair.public)
+        
+        val extensionsGenerator = ExtensionsGenerator()
 
+        extensionsGenerator.addExtension(
+            Extension.keyUsage, true, 
+            KeyUsage(KeyUsage.digitalSignature or KeyUsage.keyEncipherment)
+        )
+
+        extensionsGenerator.addExtension(
+            Extension.extendedKeyUsage, false, 
+            ExtendedKeyUsage(arrayOf(KeyPurposeId.id_kp_clientAuth))
+        )
+        
+        extensionsGenerator.addExtension(
+            Extension.basicConstraints, true,
+            BasicConstraints(false)
+        )
+
+        builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extensionsGenerator.generate())
+
+        val csr = builder.build(signer)
+        
+        val sb = StringBuilder()
+        sb.append("-----BEGIN CERTIFICATE REQUEST-----\n")
+        sb.append(Base64.encodeToString(csr.encoded, Base64.DEFAULT))
+        sb.append("-----END CERTIFICATE REQUEST-----")
+        return sb.toString()
+    }
+
+    // --- SELF-SIGNED CERT GENERATION ---
+    fun generateSelfSignedCert(keyPair: KeyPair, subject: String): String {
+        val algorithm = if (keyPair.private.algorithm == "EC") "SHA256withECDSA" else "SHA256withRSA"
+        val signer = JcaContentSignerBuilder(algorithm).build(keyPair.private)
+
+        val now = System.currentTimeMillis()
+        val startDate = Date(now)
+        val endDate = Date(now + 365L * 24 * 60 * 60 * 1000)
+        val serialNumber = BigInteger(64, SecureRandom())
+
+        val builder = JcaX509v3CertificateBuilder(
+            X500Name(subject),
+            serialNumber,
+            startDate,
+            endDate,
+            X500Name(subject),
+            keyPair.public
+        )
+
+        builder.addExtension(
+            Extension.keyUsage, true, 
+            KeyUsage(KeyUsage.digitalSignature or KeyUsage.keyEncipherment)
+        )
+        builder.addExtension(
+            Extension.extendedKeyUsage, false, 
+            ExtendedKeyUsage(arrayOf(KeyPurposeId.id_kp_clientAuth))
+        )
+        builder.addExtension(
+            Extension.basicConstraints, true, 
+            BasicConstraints(false)
+        )
+
+        val certHolder = builder.build(signer)
+        
+        val sb = StringBuilder()
+        sb.append("-----BEGIN CERTIFICATE-----\n")
+        sb.append(Base64.encodeToString(certHolder.encoded, Base64.DEFAULT))
+        sb.append("-----END CERTIFICATE-----")
+        return sb.toString()
+    }
+
+    // --- INSTALLATION (Fixed Base64 Cleaning) ---
+    fun installToSystem(context: Context, keyPair: KeyPair, certPem: String, alias: String) {
+        // FIX: Use robust filtering instead of regex to remove headers and whitespace
+        val cleanPem = PemUtils.cleanPem(certPem)
+            
+        val decoded = Base64.decode(cleanPem, Base64.DEFAULT)
+        val factory = CertificateFactory.getInstance("X.509")
+        val cert = factory.generateCertificate(ByteArrayInputStream(decoded)) as X509Certificate
+
+        val fullAlias = if (alias.startsWith("Cert_")) alias else "Cert_$alias"
+        
+        keyStore.setKeyEntry(
+            fullAlias,
+            keyPair.private,
+            null,
+            arrayOf(cert)
+        )
+    }
+
+    // --- INSPECTION ---
     fun getCertificateDetails(context: Context, alias: String): String {
         return try {
-            val privateKey = KeyChain.getPrivateKey(context, alias) ?: return "Error: Private Key not found."
-            val chain = KeyChain.getCertificateChain(context, alias)
-            if (chain.isNullOrEmpty()) return "Error: Certificate chain not found."
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
+                ?: return "Error: Could not find key entry for alias: $alias"
 
-            val cert = chain[0]
-            val publicKey = cert.publicKey
-            val factory = KeyFactory.getInstance(privateKey.algorithm, "AndroidKeyStore")
+            val cert = entry.certificate as X509Certificate
+            val privateKey = entry.privateKey
+            val factory = KeyFactory.getInstance(privateKey.algorithm, KEYSTORE_PROVIDER)
             val keyInfo = factory.getKeySpec(privateKey, KeyInfo::class.java)
 
             val sb = StringBuilder()
-
-            val securityLevel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                when (keyInfo.securityLevel) {
-                    KeyProperties.SECURITY_LEVEL_STRONGBOX -> "STRONGBOX (Titan M2/SE)"
-                    KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "TEE (TrustZone)"
-                    KeyProperties.SECURITY_LEVEL_SOFTWARE -> "SOFTWARE"
-                    else -> "UNKNOWN"
-                }
-            } else {
-                if (keyInfo.isInsideSecureHardware) "HARDWARE (TEE)" else "SOFTWARE"
-            }
-            sb.append("Storage Type:\n  $securityLevel\n\n")
-
-            val algo = publicKey.algorithm
-            val bitLength = when (publicKey) {
-                is RSAPublicKey -> publicKey.modulus.bitLength()
-                is ECPublicKey -> publicKey.params.order.bitLength()
-                else -> "Unknown"
-            }
-            sb.append("Key Info:\n  $algo - $bitLength bits\n\n")
-
-            sb.append("Validity:\n  Start: ${cert.notBefore}\n  End:   ${cert.notAfter}\n\n")
-
-            sb.append("Subject:\n  ${cert.subjectDN.name}\n\n")
-            sb.append("Issuer:\n  ${cert.issuerDN.name}")
+            val isHardware = keyInfo.isInsideSecureHardware
             
-            sb.toString()
+            sb.append("Storage Type:\n")
+            sb.append(if (isHardware) "  TEE (Trusted Execution Environment)" else "  SOFTWARE (Not Hardware Backed)")
+            sb.append("\n\n")
 
+            sb.append("Key Info:\n  ${privateKey.algorithm}\n")
+            sb.append("\nValidity:\n  Start: ${cert.notBefore}\n  End:   ${cert.notAfter}\n")
+            
+            val eku = cert.extendedKeyUsage
+            if (eku != null && eku.contains("1.3.6.1.5.5.7.3.2")) {
+                sb.append("\nFeatures:\n  [x] Client Authentication\n")
+            } else {
+                sb.append("\nFeatures:\n  [ ] No Client Auth detected\n")
+            }
+
+            sb.append("\nSubject:\n  ${cert.subjectDN.name}\n")
+            sb.append("\nIssuer:\n  ${cert.issuerDN.name}\n")
+
+            sb.toString()
         } catch (e: Exception) {
-            "Error reading details: ${e.message}"
+            "Verification Failed:\n${e.message}"
         }
     }
 }
