@@ -95,13 +95,17 @@ object CryptoManager {
         
         // We add it as a DNS Name. If it's an IP, GeneralName automatic detection might not be enough 
         // without InetAddress parsing, but DNSName is the safest generic fallback for "Server/Client" identities.
-        val generalName = GeneralName(GeneralName.dNSName, rawName)
-        val generalNames = GeneralNames(generalName)
-        
-        generator.addExtension(
-            Extension.subjectAlternativeName, false,
-            generalNames
-        )
+        // FIX: Ensure it is a valid DNS name (no spaces). If invalid, skip adding SAN or add different type.
+        // For now, simply skipping if it contains spaces to prevent invalid CSRs.
+        if (!rawName.contains(" ")) {
+            val generalName = GeneralName(GeneralName.dNSName, rawName)
+            val generalNames = GeneralNames(generalName)
+
+            generator.addExtension(
+                Extension.subjectAlternativeName, false,
+                generalNames
+            )
+        }
 
         return generator.generate()
     }
@@ -120,11 +124,7 @@ object CryptoManager {
 
         val csr = builder.build(signer)
         
-        val sb = StringBuilder()
-        sb.append("-----BEGIN CERTIFICATE REQUEST-----\n")
-        sb.append(Base64.getEncoder().encodeToString(csr.encoded))
-        sb.append("\n-----END CERTIFICATE REQUEST-----")
-        return sb.toString()
+        return PemUtils.toPem("CERTIFICATE REQUEST", csr.encoded)
     }
 
     // --- SELF-SIGNED CERT GENERATION ---
@@ -159,11 +159,7 @@ object CryptoManager {
 
         val certHolder = builder.build(signer)
         
-        val sb = StringBuilder()
-        sb.append("-----BEGIN CERTIFICATE-----\n")
-        sb.append(Base64.getEncoder().encodeToString(certHolder.encoded))
-        sb.append("\n-----END CERTIFICATE-----")
-        return sb.toString()
+        return PemUtils.toPem("CERTIFICATE", certHolder.encoded)
     }
 
     // --- P12 GENERATION ---

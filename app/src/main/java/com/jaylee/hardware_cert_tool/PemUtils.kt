@@ -17,4 +17,14 @@ object PemUtils {
 
         return content.filter { !it.isWhitespace() }
     }
+
+    /**
+     * Encodes the content to Base64 and wraps it in PEM headers/footers.
+     * Splits lines at 64 characters to comply with strict PEM parsers.
+     */
+    fun toPem(type: String, content: ByteArray): String {
+        val base64 = java.util.Base64.getEncoder().encodeToString(content)
+        val chunked = base64.chunked(64).joinToString("\n")
+        return "-----BEGIN $type-----\n$chunked\n-----END $type-----"
+    }
 }
