@@ -219,17 +219,43 @@ object CryptoManager {
     // --- INSPECTION ---
     fun getCertificateDetails(context: Context, alias: String): String {
         return try {
-            val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
-                ?: return "Error: Could not find key entry for alias: $alias"
+            // First, try loading from the System KeyChain (External/System-wide)
+            // Note: This requires the alias to be one the user has granted access to via KeyChain.choosePrivateKeyAlias
+            var privateKey = KeyChain.getPrivateKey(context, alias)
+            var certChain = KeyChain.getCertificateChain(context, alias)
+            var cert: X509Certificate? = null
 
-            val cert = entry.certificate as X509Certificate
-            val privateKey = entry.privateKey
-            val factory = KeyFactory.getInstance(privateKey.algorithm, KEYSTORE_PROVIDER)
-            val keyInfo = factory.getKeySpec(privateKey, KeyInfo::class.java)
+            if (privateKey != null && certChain != null && certChain.isNotEmpty()) {
+                 cert = certChain[0] as X509Certificate
+            } else {
+                // Fallback: Try App Internal KeyStore
+                val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
+                if (entry != null) {
+                    privateKey = entry.privateKey
+                    cert = entry.certificate as X509Certificate
+                }
+            }
+
+            if (privateKey == null || cert == null) {
+                return "Error: Could not find key entry for alias: $alias"
+            }
 
             val sb = StringBuilder()
-            val isHardware = keyInfo.isInsideSecureHardware
             
+            // Check Hardware Backing
+            // For KeyChain keys, we might need KeyFactory with "AndroidKeyStore" if the key is hardware backed.
+            // If it's a software key from KeyChain, the provider might be different.
+            var isHardware = false
+            try {
+                val factory = KeyFactory.getInstance(privateKey.algorithm, "AndroidKeyStore")
+                val keyInfo = factory.getKeySpec(privateKey, KeyInfo::class.java)
+                isHardware = keyInfo.isInsideSecureHardware
+            } catch (e: Exception) {
+                // If we can't get KeyInfo via AndroidKeyStore provider, it might be a purely software key
+                // or we don't have access to the material.
+                // However, user requirement is about TEE. 
+            }
+
             sb.append("Storage Type:\n")
             sb.append(if (isHardware) "  TEE (Trusted Execution Environment)" else "  SOFTWARE (Not Hardware Backed)")
             sb.append("\n\n")
