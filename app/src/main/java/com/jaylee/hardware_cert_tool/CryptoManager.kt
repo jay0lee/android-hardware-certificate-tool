@@ -12,6 +12,8 @@ import org.bouncycastle.asn1.x509.BasicConstraints
 import org.bouncycastle.asn1.x509.ExtendedKeyUsage
 import org.bouncycastle.asn1.x509.Extension
 import org.bouncycastle.asn1.x509.ExtensionsGenerator
+import org.bouncycastle.asn1.x509.GeneralName
+import org.bouncycastle.asn1.x509.GeneralNames
 import org.bouncycastle.asn1.x509.KeyPurposeId
 import org.bouncycastle.asn1.x509.KeyUsage
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
@@ -26,96 +28,55 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Date
 
 object CryptoManager {
-
-    private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
-
-    enum class KeyType {
-        EC_P256,
-        EC_P384,
-        RSA_2048,
-        RSA_4096
-    }
-
-    private val keyStore: KeyStore by lazy {
-        KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
-            load(null)
-        }
-    }
-
-    // --- KEY GENERATION ---
-
-    fun generateKeyPair(alias: String, type: KeyType): KeyPair {
-        val kpg = KeyPairGenerator.getInstance(
-            if (type.name.startsWith("EC")) KeyProperties.KEY_ALGORITHM_EC else KeyProperties.KEY_ALGORITHM_RSA,
-            KEYSTORE_PROVIDER
-        )
-
-        val fullAlias = if (alias.startsWith("Cert_")) alias else "Cert_$alias"
-
-        val builder = KeyGenParameterSpec.Builder(
-            fullAlias,
-            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-        )
-            .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
-        
-        when (type) {
-            KeyType.EC_P256 -> builder.setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-            KeyType.EC_P384 -> builder.setAlgorithmParameterSpec(ECGenParameterSpec("secp384r1"))
-            KeyType.RSA_2048 -> {
-                builder.setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-                builder.setKeySize(2048)
-            }
-            KeyType.RSA_4096 -> {
-                builder.setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-                builder.setKeySize(4096)
-            }
-        }
-
-        kpg.initialize(builder.build())
-        return kpg.generateKeyPair()
-    }
-
-    fun generateInMemoryKeyPair(type: KeyType): KeyPair {
-        val algorithm = if (type.name.startsWith("EC")) "EC" else "RSA"
-        val kpg = KeyPairGenerator.getInstance(algorithm) // Default provider (BC or OpenSSL)
-
-        when (type) {
-            KeyType.EC_P256 -> kpg.initialize(ECGenParameterSpec("secp256r1"))
-            KeyType.EC_P384 -> kpg.initialize(ECGenParameterSpec("secp384r1"))
-            KeyType.RSA_2048 -> kpg.initialize(2048)
-            KeyType.RSA_4096 -> kpg.initialize(4096)
-        }
-
-        return kpg.generateKeyPair()
-    }
-
-    fun createP12(keyPair: KeyPair, certPem: String, alias: String): ByteArray {
-        val cleanPem = PemUtils.cleanPem(certPem)
-        val decoded = Base64.getDecoder().decode(cleanPem)
-        val factory = CertificateFactory.getInstance("X.509")
-        val cert = factory.generateCertificate(ByteArrayInputStream(decoded)) as X509Certificate
-
-        val p12 = KeyStore.getInstance("PKCS12")
-        p12.load(null, null) // Initialize new empty keystore
-
-        // Password is required for P12 integrity, even if empty/default.
-        // Android KeyChain installer often handles no-password or default password.
-        // We'll use a blank password for simplicity as we are handing it directly to the installer.
-        val password = "".toCharArray()
-
-        p12.setKeyEntry(alias, keyPair.private, password, arrayOf(cert))
-
-        val os = java.io.ByteArrayOutputStream()
-        p12.store(os, password)
-        return os.toByteArray()
-    }
-
+// ... existing code ...
     private fun ensureDnFormat(subject: String): String {
         return if (subject.contains("=")) {
             subject
         } else {
             "CN=$subject"
         }
+    }
+
+    // Shared Extension Logic: Ensures CSR and Self-Signed Certs request identical capabilities
+    private fun generateStandardExtensions(subjectName: String): org.bouncycastle.asn1.x509.Extensions {
+        val generator = ExtensionsGenerator()
+
+        // Key Usage: Digital Signature + Key Encipherment
+        generator.addExtension(
+            Extension.keyUsage, true,
+            KeyUsage(KeyUsage.digitalSignature or KeyUsage.keyEncipherment)
+        )
+
+        // Extended Key Usage: Client Auth (OID: 1.3.6.1.5.5.7.3.2)
+        generator.addExtension(
+            Extension.extendedKeyUsage, false,
+            ExtendedKeyUsage(arrayOf(KeyPurposeId.id_kp_clientAuth))
+        )
+
+        // Basic Constraints: Not a CA
+        generator.addExtension(
+            Extension.basicConstraints, true,
+            BasicConstraints(false)
+        )
+
+        // Subject Alternative Name (SAN)
+        // Many modern clients (and Android 10+) require SAN to be present.
+        // We will mirror the CN (Common Name) into the SAN as a DNS Name or IP if applicable, 
+        // but for simplicity/robustness we'll use DNS Name if it looks like one, or just assume it's a name.
+        // Parsing the "CN=" part out if it exists.
+        val rawName = if (subjectName.startsWith("CN=")) subjectName.substring(3) else subjectName
+        
+        // We add it as a DNS Name. If it's an IP, GeneralName automatic detection might not be enough 
+        // without InetAddress parsing, but DNSName is the safest generic fallback for "Server/Client" identities.
+        val generalName = GeneralName(GeneralName.dNSName, rawName)
+        val generalNames = GeneralNames(generalName)
+        
+        generator.addExtension(
+            Extension.subjectAlternativeName, false,
+            generalNames
+        )
+
+        return generator.generate()
     }
 
     // --- CSR GENERATION ---
@@ -126,24 +87,9 @@ object CryptoManager {
         val signer = JcaContentSignerBuilder(algorithm).build(keyPair.private)
         val builder = JcaPKCS10CertificationRequestBuilder(X500Name(validSubject), keyPair.public)
         
-        val extensionsGenerator = ExtensionsGenerator()
-
-        extensionsGenerator.addExtension(
-            Extension.keyUsage, true, 
-            KeyUsage(KeyUsage.digitalSignature or KeyUsage.keyEncipherment)
-        )
-
-        extensionsGenerator.addExtension(
-            Extension.extendedKeyUsage, false, 
-            ExtendedKeyUsage(arrayOf(KeyPurposeId.id_kp_clientAuth))
-        )
-        
-        extensionsGenerator.addExtension(
-            Extension.basicConstraints, true,
-            BasicConstraints(false)
-        )
-
-        builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extensionsGenerator.generate())
+        // Use shared extensions
+        val extensions = generateStandardExtensions(subjectName)
+        builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extensions)
 
         val csr = builder.build(signer)
         
@@ -175,18 +121,14 @@ object CryptoManager {
             keyPair.public
         )
 
-        builder.addExtension(
-            Extension.keyUsage, true, 
-            KeyUsage(KeyUsage.digitalSignature or KeyUsage.keyEncipherment)
-        )
-        builder.addExtension(
-            Extension.extendedKeyUsage, false, 
-            ExtendedKeyUsage(arrayOf(KeyPurposeId.id_kp_clientAuth))
-        )
-        builder.addExtension(
-            Extension.basicConstraints, true, 
-            BasicConstraints(false)
-        )
+        // Use shared extensions
+        val extensions = generateStandardExtensions(subject)
+        val oids = extensions.oids()
+        while (oids.hasMoreElements()) {
+            val oid = oids.nextElement() as org.bouncycastle.asn1.ASN1ObjectIdentifier
+            val ext = extensions.getExtension(oid)
+            builder.addExtension(ext)
+        }
 
         val certHolder = builder.build(signer)
         

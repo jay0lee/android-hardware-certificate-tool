@@ -61,7 +61,8 @@ class CreateFragment : Fragment() {
         val keyTypes = CryptoManager.KeyType.values()
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, keyTypes)
         autoCompleteKeyType.setAdapter(adapter)
-        autoCompleteKeyType.setText(CryptoManager.KeyType.EC_P256.toString(), false)
+        // Default to RSA 2048 for better compatibility with legacy VPNs (like AnyConnect)
+        autoCompleteKeyType.setText(CryptoManager.KeyType.RSA_2048.toString(), false)
     }
     
     private fun getSelectedKeyType(): CryptoManager.KeyType {
