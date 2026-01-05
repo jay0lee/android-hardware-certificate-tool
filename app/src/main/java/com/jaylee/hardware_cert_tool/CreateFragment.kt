@@ -154,10 +154,11 @@ class CreateFragment : Fragment() {
                     
                     CryptoManager.installToSystem(requireContext(), currentKeyPair!!, certPem, alias)
                     
-                    Toast.makeText(context, "Success! Certificate Linked to Hardware Key.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Success! Certificate Linked to Hardware Key (App Internal Only).", Toast.LENGTH_LONG).show()
                     
-                    // Optional: Trigger system prompt
-                    promptSystemInstall(certPem, alias)
+                    // Note: We do NOT call promptSystemInstall here.
+                    // Since this is a Hardware Key (non-exportable), we cannot provide the Private Key to the System Installer.
+                    // Providing just the certificate (EXTRA_CERTIFICATE) causes "private key required" error because the system expects a full credential.
                     
                     // Clear inputs
                     editCertInput.setText("")
