@@ -1,6 +1,7 @@
 package com.jaylee.hardware_cert_tool
 
 import android.content.Context
+import android.os.Build
 import android.security.KeyChain
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
@@ -28,7 +29,31 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Date
 
 object CryptoManager {
-// ... existing code ...
+    private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
+        load(null)
+    }
+
+    enum class KeyType {
+        RSA_2048,
+        EC_P256
+    }
+
+    fun generateInMemoryKeyPair(type: KeyType): KeyPair {
+        val kpg = when (type) {
+            KeyType.RSA_2048 -> {
+                val generator = KeyPairGenerator.getInstance("RSA")
+                generator.initialize(2048)
+                generator
+            }
+            KeyType.EC_P256 -> {
+                val generator = KeyPairGenerator.getInstance("EC")
+                generator.initialize(ECGenParameterSpec("secp256r1"))
+                generator
+            }
+        }
+        return kpg.generateKeyPair()
+    }
+
     private fun ensureDnFormat(subject: String): String {
         return if (subject.contains("=")) {
             subject
@@ -139,8 +164,33 @@ object CryptoManager {
         return sb.toString()
     }
 
+    // --- P12 GENERATION ---
+    fun createP12(keyPair: KeyPair, certPem: String, alias: String): ByteArray {
+        val cleanPem = PemUtils.cleanPem(certPem)
+        val decoded = Base64.getDecoder().decode(cleanPem)
+        val factory = CertificateFactory.getInstance("X.509")
+        val cert = factory.generateCertificate(ByteArrayInputStream(decoded)) as X509Certificate
+
+        val p12 = KeyStore.getInstance("PKCS12")
+        p12.load(null, null) 
+        
+        // P12 requires a password for store, but we can use empty.
+        val password = "".toCharArray()
+        
+        p12.setKeyEntry(
+            alias,
+            keyPair.private,
+            password,
+            arrayOf(cert)
+        )
+        
+        val os = java.io.ByteArrayOutputStream()
+        p12.store(os, password)
+        return os.toByteArray()
+    }
+
     // --- INSTALLATION (Fixed Base64 Cleaning) ---
-    fun installToSystem(context: Context, keyPair: KeyPair, certPem: String, alias: String) {
+    fun installToSystem(keyPair: KeyPair, certPem: String, alias: String) {
         // FIX: Use robust filtering instead of regex to remove headers and whitespace
         val cleanPem = PemUtils.cleanPem(certPem)
             
@@ -191,7 +241,13 @@ object CryptoManager {
             try {
                 val factory = KeyFactory.getInstance(privateKey.algorithm, "AndroidKeyStore")
                 val keyInfo = factory.getKeySpec(privateKey, KeyInfo::class.java)
-                isHardware = keyInfo.isInsideSecureHardware
+                
+                isHardware = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    keyInfo.securityLevel != KeyProperties.SECURITY_LEVEL_SOFTWARE
+                } else {
+                    @Suppress("DEPRECATION")
+                    keyInfo.isInsideSecureHardware
+                }
             } catch (e: Exception) {
                 // If we can't get KeyInfo via AndroidKeyStore provider, it might be a purely software key
                 // or we don't have access to the material.
