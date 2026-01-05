@@ -192,16 +192,17 @@ class CreateFragment : Fragment() {
                     // 2. Generate Self-Signed Cert
                     val certPem = CryptoManager.generateSelfSignedCert(memoryKeyPair, subject)
                     
-                    // 3. Import to App's Secure Hardware Store (TEE)
-                    // This allows the app to use it internally as well.
-                    CryptoManager.installToSystem(requireContext(), memoryKeyPair, certPem, alias)
-                    
-                    // 4. Prepare System Install (P12 with Private Key)
+                    // 3. Prepare System Install (P12 with Private Key)
+                    // We skip installing to app-internal store to match "Manual CSR" behavior
                     val p12Bytes = CryptoManager.createP12(memoryKeyPair, certPem, alias)
 
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Success! Self-Signed Cert Generated.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Success! Prompting System Install...", Toast.LENGTH_SHORT).show()
                         promptSystemInstall(p12Bytes, alias)
+                        
+                        // Clear sensitive memory
+                        currentKeyPair = null
+                        currentAlias = null
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) { Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show() }
