@@ -74,14 +74,20 @@ class CreateFragment : Fragment() {
     }
     
     // Helper to Launch System Installer
-    private fun promptSystemInstall(pem: String, alias: String) {
+    private fun promptSystemInstall(pemOrP12: Any, alias: String) {
         try {
-            val cleanPem = PemUtils.cleanPem(pem)
-                
-            val certBytes = Base64.decode(cleanPem, Base64.DEFAULT)
-
             val intent = KeyChain.createInstallIntent()
-            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes)
+            
+            if (pemOrP12 is ByteArray) {
+                // It's a P12 (PKCS#12)
+                intent.putExtra(KeyChain.EXTRA_PKCS12, pemOrP12)
+            } else if (pemOrP12 is String) {
+                // It's a PEM Certificate
+                val cleanPem = PemUtils.cleanPem(pemOrP12)
+                val certBytes = Base64.decode(cleanPem, Base64.DEFAULT)
+                intent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes)
+            }
+            
             intent.putExtra(KeyChain.EXTRA_NAME, alias)
             startActivity(intent)
         } catch (e: Exception) {
@@ -172,16 +178,24 @@ class CreateFragment : Fragment() {
 
             lifecycleScope.launch(Dispatchers.Default) {
                 try {
-                    currentKeyPair = CryptoManager.generateKeyPair(alias, type)
+                    // 1. Generate In-Memory KeyPair (Software backed)
+                    val memoryKeyPair = CryptoManager.generateInMemoryKeyPair(type)
+                    currentKeyPair = memoryKeyPair
                     currentAlias = alias
                     
-                    val certPem = CryptoManager.generateSelfSignedCert(currentKeyPair!!, subject)
+                    // 2. Generate Self-Signed Cert
+                    val certPem = CryptoManager.generateSelfSignedCert(memoryKeyPair, subject)
                     
-                    CryptoManager.installToSystem(requireContext(), currentKeyPair!!, certPem, alias)
+                    // 3. Import to App's Secure Hardware Store (TEE)
+                    // This allows the app to use it internally as well.
+                    CryptoManager.installToSystem(requireContext(), memoryKeyPair, certPem, alias)
                     
+                    // 4. Prepare System Install (P12 with Private Key)
+                    val p12Bytes = CryptoManager.createP12(memoryKeyPair, certPem, alias)
+
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Success! Self-Signed Cert Installed.", Toast.LENGTH_SHORT).show()
-                        promptSystemInstall(certPem, alias)
+                        Toast.makeText(context, "Success! Self-Signed Cert Generated.", Toast.LENGTH_SHORT).show()
+                        promptSystemInstall(p12Bytes, alias)
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) { Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show() }

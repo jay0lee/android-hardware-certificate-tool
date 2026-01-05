@@ -75,6 +75,41 @@ object CryptoManager {
         return kpg.generateKeyPair()
     }
 
+    fun generateInMemoryKeyPair(type: KeyType): KeyPair {
+        val algorithm = if (type.name.startsWith("EC")) "EC" else "RSA"
+        val kpg = KeyPairGenerator.getInstance(algorithm) // Default provider (BC or OpenSSL)
+
+        when (type) {
+            KeyType.EC_P256 -> kpg.initialize(ECGenParameterSpec("secp256r1"))
+            KeyType.EC_P384 -> kpg.initialize(ECGenParameterSpec("secp384r1"))
+            KeyType.RSA_2048 -> kpg.initialize(2048)
+            KeyType.RSA_4096 -> kpg.initialize(4096)
+        }
+
+        return kpg.generateKeyPair()
+    }
+
+    fun createP12(keyPair: KeyPair, certPem: String, alias: String): ByteArray {
+        val cleanPem = PemUtils.cleanPem(certPem)
+        val decoded = Base64.getDecoder().decode(cleanPem)
+        val factory = CertificateFactory.getInstance("X.509")
+        val cert = factory.generateCertificate(ByteArrayInputStream(decoded)) as X509Certificate
+
+        val p12 = KeyStore.getInstance("PKCS12")
+        p12.load(null, null) // Initialize new empty keystore
+
+        // Password is required for P12 integrity, even if empty/default.
+        // Android KeyChain installer often handles no-password or default password.
+        // We'll use a blank password for simplicity as we are handing it directly to the installer.
+        val password = "".toCharArray()
+
+        p12.setKeyEntry(alias, keyPair.private, password, arrayOf(cert))
+
+        val os = java.io.ByteArrayOutputStream()
+        p12.store(os, password)
+        return os.toByteArray()
+    }
+
     // --- CSR GENERATION ---
     fun generateCsr(keyPair: KeyPair, subjectName: String): String {
         val algorithm = if (keyPair.private.algorithm == "EC") "SHA256withECDSA" else "SHA256withRSA"
