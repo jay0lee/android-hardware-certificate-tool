@@ -29,8 +29,10 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Date
 
 object CryptoManager {
-    private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
-        load(null)
+    private val keyStore: KeyStore by lazy {
+        KeyStore.getInstance("AndroidKeyStore").apply {
+            load(null)
+        }
     }
 
     enum class KeyType {
