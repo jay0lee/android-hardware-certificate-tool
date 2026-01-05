@@ -117,7 +117,7 @@ class CreateFragment : Fragment() {
             lifecycleScope.launch(Dispatchers.Default) {
                 try {
                     // Generate and Hold
-                    currentKeyPair = CryptoManager.generateKeyPair(alias, type)
+                    currentKeyPair = CryptoManager.generateInMemoryKeyPair(type)
                     currentAlias = alias // Remember this alias!
                     
                     val csrPem = CryptoManager.generateCsr(currentKeyPair!!, subject)
@@ -125,7 +125,7 @@ class CreateFragment : Fragment() {
                     withContext(Dispatchers.Main) {
                         val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("CSR", csrPem))
-                        Toast.makeText(context, "CSR Copied! Key saved as $alias", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "CSR Copied! Key held in memory pending install.", Toast.LENGTH_SHORT).show()
                         
                         editCertInput.setText("")
                         editCertInput.hint = "Paste the signed certificate here..."
@@ -148,23 +148,28 @@ class CreateFragment : Fragment() {
             }
             
             if (certPem.isNotBlank()) {
-                try {
-                    // FIX: Use the SAME alias we generated earlier
-                    val alias = currentAlias!! 
-                    
-                    CryptoManager.installToSystem(requireContext(), currentKeyPair!!, certPem, alias)
-                    
-                    Toast.makeText(context, "Success! Certificate Linked to Hardware Key (App Internal Only).", Toast.LENGTH_LONG).show()
-                    
-                    // Note: We do NOT call promptSystemInstall here.
-                    // Since this is a Hardware Key (non-exportable), we cannot provide the Private Key to the System Installer.
-                    // Providing just the certificate (EXTRA_CERTIFICATE) causes "private key required" error because the system expects a full credential.
-                    
-                    // Clear inputs
-                    editCertInput.setText("")
-                    
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Mismatch Error: ${e.message}", Toast.LENGTH_LONG).show()
+                lifecycleScope.launch(Dispatchers.Default) {
+                    try {
+                        val alias = currentAlias!! 
+                        
+                        // Create P12 (Private Key + Certificate)
+                        // This allows us to pass both to the System Installer.
+                        val p12Bytes = CryptoManager.createP12(currentKeyPair!!, certPem, alias)
+                        
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Success! Prompting System Install...", Toast.LENGTH_LONG).show()
+                            promptSystemInstall(p12Bytes, alias)
+                            
+                            // Clear inputs and sensitive memory
+                            editCertInput.setText("")
+                            currentKeyPair = null 
+                            currentAlias = null
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) { 
+                            Toast.makeText(context, "Mismatch Error: ${e.message}", Toast.LENGTH_LONG).show() 
+                        }
+                    }
                 }
             } else {
                 Toast.makeText(context, "Paste the certificate first", Toast.LENGTH_SHORT).show()
