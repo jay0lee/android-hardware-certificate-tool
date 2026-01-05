@@ -5,7 +5,7 @@ import android.security.KeyChain
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
-import android.util.Base64
+import java.util.Base64
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.BasicConstraints
@@ -36,8 +36,10 @@ object CryptoManager {
         RSA_4096
     }
 
-    private val keyStore: KeyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
-        load(null)
+    private val keyStore: KeyStore by lazy {
+        KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
+            load(null)
+        }
     }
 
     // --- KEY GENERATION ---
@@ -103,8 +105,8 @@ object CryptoManager {
         
         val sb = StringBuilder()
         sb.append("-----BEGIN CERTIFICATE REQUEST-----\n")
-        sb.append(Base64.encodeToString(csr.encoded, Base64.DEFAULT))
-        sb.append("-----END CERTIFICATE REQUEST-----")
+        sb.append(Base64.getEncoder().encodeToString(csr.encoded))
+        sb.append("\n-----END CERTIFICATE REQUEST-----")
         return sb.toString()
     }
 
@@ -144,8 +146,8 @@ object CryptoManager {
         
         val sb = StringBuilder()
         sb.append("-----BEGIN CERTIFICATE-----\n")
-        sb.append(Base64.encodeToString(certHolder.encoded, Base64.DEFAULT))
-        sb.append("-----END CERTIFICATE-----")
+        sb.append(Base64.getEncoder().encodeToString(certHolder.encoded))
+        sb.append("\n-----END CERTIFICATE-----")
         return sb.toString()
     }
 
@@ -154,7 +156,7 @@ object CryptoManager {
         // FIX: Use robust filtering instead of regex to remove headers and whitespace
         val cleanPem = PemUtils.cleanPem(certPem)
             
-        val decoded = Base64.decode(cleanPem, Base64.DEFAULT)
+        val decoded = Base64.getDecoder().decode(cleanPem)
         val factory = CertificateFactory.getInstance("X.509")
         val cert = factory.generateCertificate(ByteArrayInputStream(decoded)) as X509Certificate
 
