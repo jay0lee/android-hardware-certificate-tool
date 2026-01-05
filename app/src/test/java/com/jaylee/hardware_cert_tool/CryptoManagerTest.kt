@@ -43,4 +43,17 @@ class CryptoManagerTest {
         assertTrue("Cert should start with header", cert.contains("-----BEGIN CERTIFICATE-----"))
         assertTrue("Cert should end with footer", cert.contains("-----END CERTIFICATE-----"))
     }
+
+    @Test
+    fun generateCsr_withSimpleString_succeeds() {
+        val kpg = KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        val keyPair = kpg.generateKeyPair()
+
+        val subject = "User" // Plain string, not a DN
+        
+        val csr = CryptoManager.generateCsr(keyPair, subject)
+
+        assertTrue("CSR should start with header", csr.contains("-----BEGIN CERTIFICATE REQUEST-----"))
+    }
 }

@@ -110,12 +110,21 @@ object CryptoManager {
         return os.toByteArray()
     }
 
+    private fun ensureDnFormat(subject: String): String {
+        return if (subject.contains("=")) {
+            subject
+        } else {
+            "CN=$subject"
+        }
+    }
+
     // --- CSR GENERATION ---
     fun generateCsr(keyPair: KeyPair, subjectName: String): String {
+        val validSubject = ensureDnFormat(subjectName)
         val algorithm = if (keyPair.private.algorithm == "EC") "SHA256withECDSA" else "SHA256withRSA"
         
         val signer = JcaContentSignerBuilder(algorithm).build(keyPair.private)
-        val builder = JcaPKCS10CertificationRequestBuilder(X500Name(subjectName), keyPair.public)
+        val builder = JcaPKCS10CertificationRequestBuilder(X500Name(validSubject), keyPair.public)
         
         val extensionsGenerator = ExtensionsGenerator()
 
@@ -147,6 +156,7 @@ object CryptoManager {
 
     // --- SELF-SIGNED CERT GENERATION ---
     fun generateSelfSignedCert(keyPair: KeyPair, subject: String): String {
+        val validSubject = ensureDnFormat(subject)
         val algorithm = if (keyPair.private.algorithm == "EC") "SHA256withECDSA" else "SHA256withRSA"
         val signer = JcaContentSignerBuilder(algorithm).build(keyPair.private)
 
@@ -155,12 +165,13 @@ object CryptoManager {
         val endDate = Date(now + 365L * 24 * 60 * 60 * 1000)
         val serialNumber = BigInteger(64, SecureRandom())
 
+        val dnName = X500Name(validSubject)
         val builder = JcaX509v3CertificateBuilder(
-            X500Name(subject),
+            dnName,
             serialNumber,
             startDate,
             endDate,
-            X500Name(subject),
+            dnName,
             keyPair.public
         )
 
